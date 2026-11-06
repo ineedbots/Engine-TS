@@ -1,9 +1,14 @@
 import * as rsbuf from '#/network/rsbuf/index.js';
 
+import Component from '#/cache/config/Component.js';
 import InvType from '#/cache/config/InvType.js';
+import ObjType from '#/cache/config/ObjType.js';
+import { ParamHelper } from '#/cache/config/ParamHelper.js';
+import ParamType from '#/cache/config/ParamType.js';
 import { CoordGrid } from '#/engine/CoordGrid.js';
 import { ModalState } from '#/engine/entity/ModalState.js';
 import Player from '#/engine/entity/Player.js';
+import { Inventory } from '#/engine/Inventory.js';
 import World from '#/engine/World.js';
 import { WorldStat } from '#/engine/WorldStat.js';
 import Zone from '#/engine/zone/Zone.js';
@@ -18,6 +23,7 @@ import IfOpenMain from '#/network/game/server/model/IfOpenMain.js';
 import IfOpenMainSide from '#/network/game/server/model/IfOpenMainSide.js';
 import IfOpenOverlay from '#/network/game/server/model/IfOpenOverlay.js';
 import IfOpenSide from '#/network/game/server/model/IfOpenSide.js';
+import IfSetText from '#/network/game/server/model/IfSetText.js';
 import Logout from '#/network/game/server/model/Logout.js';
 import NpcInfo from '#/network/game/server/model/NpcInfo.js';
 import PlayerInfo from '#/network/game/server/model/PlayerInfo.js';
@@ -43,6 +49,7 @@ export class NetworkPlayer extends Player {
 
     userPath: number[] = [];
     opcalled: boolean = false;
+    private lastSpectateInventoryTarget: Player | null = null;
 
     constructor(username: string, username37: bigint, hash64: bigint, client: ClientSocket) {
         super(username, username37, hash64);
@@ -135,7 +142,10 @@ export class NetworkPlayer extends Player {
 
             if (decoder) {
                 const message = decoder.decode(NetworkPlayer.inBuf, this.client.waiting);
-                const success: boolean = ClientGameProtRepository.getHandler(packetType)?.handle(message, this) ?? false;
+                // Keep connection/map events working, but suppress gameplay while observing.
+                const observing = this.spectateTarget !== null;
+                const blocked = observing && (packetType === ClientGameProt.IDLE_TIMER || (packetType !== ClientGameProt.CLIENT_CHEAT && message.category !== ClientGameProtCategory.CLIENT_EVENT));
+                const success: boolean = blocked || (ClientGameProtRepository.getHandler(packetType)?.handle(message, this) ?? false);
 
                 // todo: move out of model
                 if (success && message.category === ClientGameProtCategory.USER_EVENT) {
@@ -252,13 +262,15 @@ export class NetworkPlayer extends Player {
         const mapZone = CoordGrid.packCoord(0, (this.x >> 6) << 6, (this.z >> 6) << 6);
         if (this.lastMapZone !== mapZone) {
             // map zone triggers
-            if (this.lastMapZone !== -1) {
+            if (!this.spectateTarget && this.lastMapZone !== -1) {
                 const { x, z } = CoordGrid.unpackCoord(this.lastMapZone);
                 this.triggerMapzoneExit(x, z);
             }
 
-            this.triggerMapzone((this.x >> 6) << 6, (this.z >> 6) << 6);
-            this.lastMapZone = mapZone;
+            if (!this.spectateTarget) {
+                this.triggerMapzone((this.x >> 6) << 6, (this.z >> 6) << 6);
+                this.lastMapZone = mapZone;
+            }
         }
 
         // zone changed
@@ -273,13 +285,15 @@ export class NetworkPlayer extends Player {
                 this.write(new SetMultiway(nowIsMulti));
             }
 
-            if (this.lastZone !== -1) {
+            if (!this.spectateTarget && this.lastZone !== -1) {
                 const { level, x, z } = CoordGrid.unpackCoord(this.lastZone);
                 this.triggerZoneExit(level, x, z);
             }
 
-            this.triggerZone(this.level, (this.x >> 3) << 3, (this.z >> 3) << 3);
-            this.lastZone = zone;
+            if (!this.spectateTarget) {
+                this.triggerZone(this.level, (this.x >> 3) << 3, (this.z >> 3) << 3);
+                this.lastZone = zone;
+            }
         }
     }
 
@@ -315,17 +329,18 @@ export class NetworkPlayer extends Player {
     }
 
     updateStats() {
-        for (let i = 0; i < this.stats.length; i++) {
-            if (this.stats[i] !== this.lastStats[i] || this.levels[i] !== this.lastLevels[i]) {
-                this.write(new UpdateStat(i, this.stats[i], this.levels[i]));
-                this.lastStats[i] = this.stats[i];
-                this.lastLevels[i] = this.levels[i];
+        const source = this.spectateTarget ?? this;
+        for (let i = 0; i < source.stats.length; i++) {
+            if (source.stats[i] !== this.lastStats[i] || source.levels[i] !== this.lastLevels[i]) {
+                this.write(new UpdateStat(i, source.stats[i], source.levels[i]));
+                this.lastStats[i] = source.stats[i];
+                this.lastLevels[i] = source.levels[i];
             }
         }
 
-        if (Math.floor(this.runenergy) / 100 !== Math.floor(this.lastRunEnergy) / 100) {
-            this.write(new UpdateRunEnergy(this.runenergy));
-            this.lastRunEnergy = this.runenergy;
+        if (Math.floor(source.runenergy) / 100 !== Math.floor(this.lastRunEnergy) / 100) {
+            this.write(new UpdateRunEnergy(source.runenergy));
+            this.lastRunEnergy = source.runenergy;
         }
     }
 
@@ -339,7 +354,10 @@ export class NetworkPlayer extends Player {
                 continue;
             }
 
-            const needsFullUpdate = listener.firstSeen;
+            // Show the observed account in our inventory and equipment tabs without
+            // changing either account's items or the listener's original source.
+            const spectateInventory = (listener.type === InvType.INV || listener.type === InvType.WORN) && listener.source === this.uid;
+            const needsFullUpdate = listener.firstSeen || (spectateInventory && this.spectateTarget !== this.lastSpectateInventoryTarget);
 
             if (listener.source === -1) {
                 // world inventory
@@ -356,7 +374,7 @@ export class NetworkPlayer extends Player {
                 }
             } else {
                 // player inventory
-                const player = World.getPlayerByUid(listener.source);
+                const player = spectateInventory && this.spectateTarget ? this.spectateTarget : World.getPlayerByUid(listener.source);
                 if (!player) {
                     continue;
                 }
@@ -375,6 +393,9 @@ export class NetworkPlayer extends Player {
                 }
 
                 if (inv.update || needsFullUpdate) {
+                    if (spectateInventory && listener.type === InvType.WORN && (this.spectateTarget || this.lastSpectateInventoryTarget)) {
+                        this.updateSpectateEquipmentBonuses(inv);
+                    }
                     const invType = InvType.get(listener.type);
                     if (invType.runweight) {
                         runWeightChanged = true;
@@ -391,6 +412,42 @@ export class NetworkPlayer extends Player {
 
         if (runWeightChanged || firstSeen) {
             this.write(new UpdateRunWeight(Math.trunc(this.runweight / 1000)));
+        }
+
+        this.lastSpectateInventoryTarget = this.spectateTarget;
+    }
+
+    private updateSpectateEquipmentBonuses(inv: Inventory): void {
+        const bonuses = [
+            ['stabattack', 'Stab'],
+            ['slashattack', 'Slash'],
+            ['crushattack', 'Crush'],
+            ['magicattack', 'Magic'],
+            ['rangeattack', 'Range'],
+            ['stabdefence', 'Stab'],
+            ['slashdefence', 'Slash'],
+            ['crushdefence', 'Crush'],
+            ['magicdefence', 'Magic'],
+            ['rangedefence', 'Range'],
+            ['strengthbonus', 'Strength'],
+            ['prayerbonus', 'Prayer']
+        ];
+
+        // Match the equipment tab's bonus text without executing gameplay scripts
+        // or changing either player's combat variables.
+        for (const [name, label] of bonuses) {
+            const component = Component.getId(`wornitems:${name}`);
+            const param = ParamType.getByName(name);
+            if (component === -1 || !param) {
+                continue;
+            }
+            let bonus = 0;
+            for (const item of inv.items) {
+                if (item) {
+                    bonus += ParamHelper.getIntParam(param.id, ObjType.get(item.id), param.defaultInt);
+                }
+            }
+            this.write(new IfSetText(component, `${label}: ${bonus < 0 ? '' : '+'}${bonus}`));
         }
     }
 }

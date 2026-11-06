@@ -57,6 +57,34 @@ export default class ClientCheatHandler extends ClientGameMessageHandler<ClientC
         if (!Environment.node.production && player.staffModLevel >= 4) {
             // developer commands
 
+            if (cmd === 'spectate') {
+                const username = args.join(' ').trim();
+                if (!username) {
+                    player.messageGame('Usage: ::spectate <username> | ::spectate off');
+                    return true;
+                }
+                if (username === 'off' || username === 'stop') {
+                    player.stopSpectating();
+                    return true;
+                }
+                const target = World.getPlayerByUsername(username);
+                if (!target || !target.isActive || target.loggingOut || !isClientConnected(target)) {
+                    player.messageGame('That account is not logged in.');
+                } else if (target === player || target.spectateTarget) {
+                    player.messageGame('Choose another account that is not spectating.');
+                } else if (!player.spectateTarget && (player.busy() || player.activeScript || player.protect)) {
+                    player.messageGame('Finish your current action before spectating.');
+                } else {
+                    player.startSpectating(target);
+                }
+                return true;
+            }
+
+            if (player.spectateTarget) {
+                player.messageGame('Use ::spectate off before running other developer commands.');
+                return true;
+            }
+
             if (cmd[0] === Environment.node.debugProcChar) {
                 // debugprocs are NOT allowed on live ;)
                 const script = ScriptProvider.getByName(`[debugproc,${cmd.slice(1)}]`);

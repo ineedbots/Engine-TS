@@ -384,6 +384,11 @@ class World {
             // player login, good spot for it (before packets so they immediately load but after processing so nothing hits them)
             this.processLogins();
 
+            // Follow after movement/logouts and before tracking zones for this tick.
+            for (const player of this.playerLoop.all()) {
+                player.updateSpectating();
+            }
+
             // process zones
             // - build list of active zones around players
             // - loc/obj despawn/respawn
@@ -688,6 +693,9 @@ class World {
         const start: number = Date.now();
 
         for (const player of this.playerLoop.all()) {
+            if (player.spectateTarget) {
+                continue;
+            }
             try {
                 if (player.delayed && this.currentTick >= player.delayedUntil) player.delayed = false;
 
@@ -1603,6 +1611,8 @@ class World {
         if (player.slot === -1) {
             return;
         }
+
+        player.stopSpectating();
 
         if (isClientConnected(player)) {
             player.logout();

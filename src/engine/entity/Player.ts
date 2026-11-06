@@ -191,9 +191,9 @@ export default class Player extends PathingEntity {
         sav.p2(PlayerLoading.SAV_MAGIC); // magic
         sav.p2(PlayerLoading.SAV_VERSION); // version
 
-        sav.p2(this.x);
-        sav.p2(this.z);
-        sav.p1(this.level);
+        sav.p2(this.spectateOrigin?.x ?? this.x);
+        sav.p2(this.spectateOrigin?.z ?? this.z);
+        sav.p1(this.spectateOrigin?.level ?? this.level);
         for (let i = 0; i < 7; i++) {
             sav.p1(this.body[i]);
         }
@@ -375,6 +375,55 @@ export default class Player extends PathingEntity {
 
     staffModLevel: number = 0;
     visibility: Visibility = Visibility.DEFAULT;
+    spectateTarget: Player | null = null;
+    private spectateOrigin: { x: number; z: number; level: number; visibility: Visibility } | null = null;
+
+    startSpectating(target: Player): void {
+        if (!this.spectateOrigin) {
+            this.spectateOrigin = { x: this.x, z: this.z, level: this.level, visibility: this.visibility };
+            this.stopAction();
+            this.clearWaypoints();
+            this.setVisibility(Visibility.HARD);
+        }
+        this.spectateTarget = target;
+        this.masks |= PlayerInfoProt.APPEARANCE;
+        this.messageGame(`Spectating ${target.username}. Use ::spectate off to return.`);
+    }
+
+    stopSpectating(): void {
+        const origin = this.spectateOrigin;
+        if (!origin) {
+            return;
+        }
+        this.spectateTarget = null;
+        this.spectateOrigin = null;
+        this.masks |= PlayerInfoProt.APPEARANCE;
+        this.clearWaypoints();
+        this.teleport(origin.x, origin.z, origin.level);
+        this.setVisibility(origin.visibility);
+        this.buildArea.rebuildNormal();
+        this.buildArea.rebuildZones();
+        this.messageGame('Spectating ended.');
+    }
+
+    updateSpectating(): void {
+        const target = this.spectateTarget;
+        if (!target) {
+            return;
+        }
+        if (!target.isActive || target.loggingOut || target.spectateTarget || World.getPlayerByUsername(target.username) !== target) {
+            this.messageGame('Your spectate target is no longer available.');
+            this.stopSpectating();
+            return;
+        }
+        // The 289 client draws only one centered player per tile. Keep the empty
+        // local avatar next to the target so it cannot suppress the target's model.
+        const x = target.x + 1;
+        if (this.x !== x || this.z !== target.z || this.level !== target.level) {
+            this.teleport(x, target.z, target.level);
+            this.validateDistanceWalked();
+        }
+    }
 
     heroPoints: HeroPoints = new HeroPoints(16); // be sure to reset when stats are recovered/reset
 
@@ -565,10 +614,11 @@ export default class Player extends PathingEntity {
             this.write(new IfSetTab(this.tabs[i], i));
         }
         this.refreshInvs();
-        for (let i = 0; i < this.stats.length; i++) {
-            this.write(new UpdateStat(i, this.stats[i], this.levels[i]));
+        const statsSource = this.spectateTarget ?? this;
+        for (let i = 0; i < statsSource.stats.length; i++) {
+            this.write(new UpdateStat(i, statsSource.stats[i], statsSource.levels[i]));
         }
-        this.write(new UpdateRunEnergy(this.runenergy));
+        this.write(new UpdateRunEnergy(statsSource.runenergy));
         this.write(new ResetAnims());
         this.masks |= this.entitymask; // resync face_entity
         this.masks |= PlayerInfoProt.APPEARANCE; // resync appearance (todo: is it possible to do this for the local observer only?)
@@ -1364,7 +1414,7 @@ export default class Player extends PathingEntity {
         const stream = Packet.alloc(0);
 
         stream.p1(this.gender);
-        stream.p1(this.headicons);
+        stream.p1(this.spectateTarget ? 0 : this.headicons);
 
         // todo: transmog support - write first "slot" with -1, followed by npc ID
 
@@ -1397,6 +1447,12 @@ export default class Player extends PathingEntity {
         }
 
         for (let slot = 0; slot < 12; slot++) {
+            // The local player is always rendered by the client. An empty model
+            // keeps our own avatar from covering the account being observed.
+            if (this.spectateTarget) {
+                stream.p1(0);
+                continue;
+            }
             if (this.npcId != -1) {
                 stream.p2(-1);
                 stream.p2(this.npcId);
