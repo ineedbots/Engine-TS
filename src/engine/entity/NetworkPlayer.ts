@@ -5,6 +5,7 @@ import InvType from '#/cache/config/InvType.js';
 import ObjType from '#/cache/config/ObjType.js';
 import { ParamHelper } from '#/cache/config/ParamHelper.js';
 import ParamType from '#/cache/config/ParamType.js';
+import VarPlayerType from '#/cache/config/VarPlayerType.js';
 import { CoordGrid } from '#/engine/CoordGrid.js';
 import { ModalState } from '#/engine/entity/ModalState.js';
 import Player from '#/engine/entity/Player.js';
@@ -23,6 +24,7 @@ import IfOpenMain from '#/network/game/server/model/IfOpenMain.js';
 import IfOpenMainSide from '#/network/game/server/model/IfOpenMainSide.js';
 import IfOpenOverlay from '#/network/game/server/model/IfOpenOverlay.js';
 import IfOpenSide from '#/network/game/server/model/IfOpenSide.js';
+import IfSetColour from '#/network/game/server/model/IfSetColour.js';
 import IfSetText from '#/network/game/server/model/IfSetText.js';
 import Logout from '#/network/game/server/model/Logout.js';
 import NpcInfo from '#/network/game/server/model/NpcInfo.js';
@@ -33,6 +35,8 @@ import UpdateInvPartial from '#/network/game/server/model/UpdateInvPartial.js';
 import UpdateRunEnergy from '#/network/game/server/model/UpdateRunEnergy.js';
 import UpdateRunWeight from '#/network/game/server/model/UpdateRunWeight.js';
 import UpdateStat from '#/network/game/server/model/UpdateStat.js';
+import VarpLarge from '#/network/game/server/model/VarpLarge.js';
+import VarpSmall from '#/network/game/server/model/VarpSmall.js';
 import ServerGameMessage from '#/network/game/server/ServerGameMessage.js';
 import ClientSocket from '#/server/ClientSocket.js';
 import NullClientSocket from '#/server/NullClientSocket.js';
@@ -50,6 +54,10 @@ export class NetworkPlayer extends Player {
     userPath: number[] = [];
     opcalled: boolean = false;
     private lastSpectateInventoryTarget: Player | null = null;
+    private questColours: Map<number, number> = new Map();
+    private lastSpectateQuestColours: Map<number, number> = new Map();
+    private lastSpectateQuestTarget: Player | null = null;
+    private lastSpectateQuestPoints: number | null = null;
 
     constructor(username: string, username37: bigint, hash64: bigint, client: ClientSocket) {
         super(username, username37, hash64);
@@ -198,6 +206,25 @@ export class NetworkPlayer extends Player {
         }
     }
 
+    override onReconnect() {
+        super.onReconnect();
+        this.lastSpectateQuestColours.clear();
+        this.lastSpectateQuestPoints = null;
+        this.updateSpectateQuests();
+    }
+
+    override write(message: ServerGameMessage): void {
+        // Remember content's quest states, including quests with progress that
+        // depends on several variables or bit flags.
+        if (message instanceof IfSetColour) {
+            const root = Component.getId('questlist');
+            if (root !== -1 && Component.get(message.component)?.rootLayer === root) {
+                this.questColours.set(message.component, message.colour);
+            }
+        }
+        super.write(message);
+    }
+
     writeInner(message: ServerGameMessage): void {
         const client = this.client;
 
@@ -341,6 +368,42 @@ export class NetworkPlayer extends Player {
         if (Math.floor(source.runenergy) / 100 !== Math.floor(this.lastRunEnergy) / 100) {
             this.write(new UpdateRunEnergy(source.runenergy));
             this.lastRunEnergy = source.runenergy;
+        }
+
+        this.updateSpectateQuests();
+    }
+
+    private updateSpectateQuests(): void {
+        if (!this.spectateTarget && !this.lastSpectateQuestTarget) {
+            return;
+        }
+
+        const source = this.spectateTarget && isClientConnected(this.spectateTarget) ? this.spectateTarget : this;
+        const changedTarget = this.spectateTarget !== this.lastSpectateQuestTarget;
+        const components = new Set([...this.questColours.keys(), ...source.questColours.keys(), ...this.lastSpectateQuestColours.keys()]);
+        for (const component of components) {
+            // Tutorial accounts may not have initialized the quest tab yet.
+            const colour = source.questColours.get(component) ?? Component.get(component).colour;
+            if (changedTarget || this.lastSpectateQuestColours.get(component) !== colour) {
+                // Bypass write() so the observed colours never replace our own cache.
+                this.writeInner(new IfSetColour(component, colour));
+                this.lastSpectateQuestColours.set(component, colour);
+            }
+        }
+
+        const questPointsVar = VarPlayerType.getId('qp');
+        if (questPointsVar !== -1) {
+            const points = source.vars[questPointsVar];
+            if (changedTarget || points !== this.lastSpectateQuestPoints) {
+                this.writeInner(points >= -128 && points <= 127 ? new VarpSmall(questPointsVar, points) : new VarpLarge(questPointsVar, points));
+                this.lastSpectateQuestPoints = points;
+            }
+        }
+
+        this.lastSpectateQuestTarget = this.spectateTarget;
+        if (!this.spectateTarget) {
+            this.lastSpectateQuestColours.clear();
+            this.lastSpectateQuestPoints = null;
         }
     }
 
