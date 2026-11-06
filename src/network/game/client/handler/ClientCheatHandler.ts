@@ -193,6 +193,12 @@ export default class ClientCheatHandler extends ClientGameMessageHandler<ClientC
 
                 player.messageGame(`World speed was changed to ${speed}ms`);
                 World.tickRate = speed;
+            } else if (cmd === 'infiniterun' || cmd === 'infiniteenergy') {
+                player.infiniteRun = !player.infiniteRun;
+                if (player.infiniteRun) {
+                    player.runenergy = 10000;
+                }
+                player.messageGame(`Infinite run energy ${player.infiniteRun ? 'enabled' : 'disabled'}.`);
             } else if (cmd === 'fly') {
                 if (player.moveStrategy === MoveStrategy.FLY) {
                     player.moveStrategy = MoveStrategy.SMART;

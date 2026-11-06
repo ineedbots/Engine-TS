@@ -291,6 +291,7 @@ export default class Player extends PathingEntity {
     run: number = 0;
     tempRun: number = 0;
     runenergy: number = 10000;
+    infiniteRun: boolean = false;
     lastRunEnergy: number = -1;
     runweight: number = 0;
     playtime: number = 0;
@@ -749,6 +750,10 @@ export default class Player extends PathingEntity {
     }
 
     updateEnergy() {
+        if (this.infiniteRun) {
+            this.runenergy = 10000;
+            return;
+        }
         if (this.delayed) {
             return;
         }
