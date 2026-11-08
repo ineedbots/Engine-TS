@@ -85,7 +85,33 @@ export default class ClientCheatHandler extends ClientGameMessageHandler<ClientC
                 return true;
             }
 
-            if (cmd[0] === Environment.node.debugProcChar) {
+            if (cmd === 'macroevent') {
+                const specificEvents = new Set(['zombie', 'shade', 'dryad', 'lostaxe', 'lost_axe', 'lostpickaxe', 'lost_pickaxe', 'rockgolem', 'rock_golem', 'rivertroll', 'river_troll', 'watchman']);
+                if (args.length === 1 && specificEvents.has(args[0])) {
+                    const script = ScriptProvider.getByName('[debugproc,specific_macro_event]');
+                    if (!script) {
+                        player.messageGame('The specific macro event test script is unavailable.');
+                        return true;
+                    }
+
+                    player.executeScript(ScriptRunner.init(script, player, null, [args[0]]), false);
+                    return true;
+                }
+
+                const eventId = args.length === 1 && /^\d+$/.test(args[0]) ? Number(args[0]) : NaN;
+                if (!Number.isSafeInteger(eventId)) {
+                    player.messageGame('Usage: ::macroevent <event_id|zombie|shade|dryad|lostaxe|lostpickaxe|rockgolem|rivertroll|watchman>');
+                    return true;
+                }
+
+                const script = ScriptProvider.getByName('[debugproc,macro_event]');
+                if (!script) {
+                    player.messageGame('The macro event test script is unavailable.');
+                    return true;
+                }
+
+                player.executeScript(ScriptRunner.init(script, player, null, [eventId]), false);
+            } else if (cmd[0] === Environment.node.debugProcChar) {
                 // debugprocs are NOT allowed on live ;)
                 const script = ScriptProvider.getByName(`[debugproc,${cmd.slice(1)}]`);
                 if (!script) {
