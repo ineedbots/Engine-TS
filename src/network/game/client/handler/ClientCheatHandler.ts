@@ -610,7 +610,14 @@ export default class ClientCheatHandler extends ClientGameMessageHandler<ClientC
         if (player.staffModLevel >= 2) {
             // "super-moderator" commands (similar to a jmod but we don't know their command capabilities on live)
 
-            if (cmd === 'getcoord') {
+            if (cmd === 'list') {
+                const onlinePlayers = World.players.filter((other): other is Player => !!other && other.isActive && !other.loggingOut && isClientConnected(other));
+
+                player.messageGame(`Online players (${onlinePlayers.length}):`);
+                for (const other of onlinePlayers) {
+                    player.messageGame(other.username);
+                }
+            } else if (cmd === 'getcoord') {
                 // authentic
 
                 // Displays current coordinate
