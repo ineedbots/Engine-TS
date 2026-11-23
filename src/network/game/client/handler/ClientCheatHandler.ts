@@ -80,11 +80,6 @@ export default class ClientCheatHandler extends ClientGameMessageHandler<ClientC
                 return true;
             }
 
-            if (player.spectateTarget) {
-                player.messageGame('Use ::spectate off before running other developer commands.');
-                return true;
-            }
-
             if (cmd === 'macroevent') {
                 const specificEvents = new Set(['zombie', 'shade', 'dryad', 'lostaxe', 'lost_axe', 'lostpickaxe', 'lost_pickaxe', 'rockgolem', 'rock_golem', 'rivertroll', 'river_troll', 'watchman']);
                 if (args.length === 1 && specificEvents.has(args[0])) {
