@@ -953,6 +953,8 @@ class World {
             this.gameMap.getZone(player.x, player.z, player.level).enter(player);
             player.onLogin();
 
+            printDebug(`Player ${player.username} logged in at ${player.x},${player.z},${player.level} (slot ${player.slot})`);
+
             if (this.shutdownTick != -1) {
                 player.write(new UpdateRebootTimer(this.shutdownTick - this.currentTick));
             }
@@ -1631,6 +1633,7 @@ class World {
 
         player.isActive = false;
 
+        printDebug(`[World] removePlayer => username: ${player.username}, slot: ${player.slot}, uid: ${player.uid}, totalPlayers: ${this.getTotalPlayers()}`);
         player.addSessionLog(LoggerEventType.MODERATOR, 'Logged out');
         this.flushPlayer(player);
 
@@ -2282,8 +2285,6 @@ class World {
             event_type
         });
         trackSessionEventsPublished.inc();
-
-        printDebug(`[World] addSessionLog => session_uuid: ${session_uuid}, coord: ${coord}, event_type: ${event_type}, event: ${args.length ? message + ' ' + args.join(' ') : message}`);
     }
 
     addWealthEvent(event: WealthEvent) {
