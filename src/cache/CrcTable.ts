@@ -1,5 +1,6 @@
 import Packet from '#/io/Packet.js';
 import OnDemand from '#/engine/OnDemand.js';
+import { printDebug } from '#/util/Logger.js';
 
 export const CrcBuffer: Packet = new Packet(new Uint8Array(4 * 9 + 4));
 export let CrcTable: number[] = [];
@@ -20,6 +21,8 @@ export function makeCrcs() {
             CrcTable[i] = 0;
             CrcBuffer.p4(0);
         }
+
+        printDebug(`[World] makeCrcs => index: ${i}, crc: ${CrcTable[i]}`);
     }
 
     let hash = 1234;
@@ -29,4 +32,6 @@ export function makeCrcs() {
     CrcBuffer.p4(hash);
 
     CrcBuffer32 = Packet.getcrc(CrcBuffer.data, 0, CrcBuffer.data.length - 4);
+
+    printDebug(`[World] makeCrcs => CrcBuffer32: ${CrcBuffer32}`);
 }

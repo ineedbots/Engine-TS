@@ -289,6 +289,8 @@ class World {
 
         // todo: check if any jag files changed (transmitted) then reload crcs, instead of always
         makeCrcs();
+
+        printDebug(`[World] reload => Environment: ${JSON.stringify(Environment, null, 2)}`);
     }
 
     async start(skipMaps = false, startCycle = true): Promise<void> {
@@ -2280,6 +2282,8 @@ class World {
             event_type
         });
         trackSessionEventsPublished.inc();
+
+        printDebug(`[World] addSessionLog => session_uuid: ${session_uuid}, coord: ${coord}, event_type: ${event_type}, event: ${args.length ? message + ' ' + args.join(' ') : message}`);
     }
 
     addWealthEvent(event: WealthEvent) {
